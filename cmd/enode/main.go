@@ -113,6 +113,6 @@ func initDB() {
 }
 
 func initLog() error {
-	log.InitLog(conf.EKTConf.LogPath)
+	log.InitLog(conf.EKTConfig.LogPath)
 	return nil
 }
