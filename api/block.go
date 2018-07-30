@@ -20,7 +20,7 @@ import (
 )
 
 func init() {
-	x_router.Post("/blocks/api/last", lastBlock)
+	x_router.Post("/block/api/last", lastBlock)
 	x_router.Get("/block/api/blockByHeight", blockByHeight)
 	x_router.Post("/block/api/newBlock", newBlock)
 }
