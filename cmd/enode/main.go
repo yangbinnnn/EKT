@@ -3,17 +3,19 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
+	"os"
+
 	_ "github.com/EducationEKT/EKT/api"
 	"github.com/EducationEKT/EKT/blockchain_manager"
 	"github.com/EducationEKT/EKT/conf"
 	"github.com/EducationEKT/EKT/db"
 	"github.com/EducationEKT/EKT/log"
 	"github.com/EducationEKT/EKT/param"
-	"net/http"
-	"os"
+
+	"runtime"
 
 	"github.com/EducationEKT/xserver/x_http"
-	"runtime"
 )
 
 const (
@@ -111,6 +113,6 @@ func initDB() {
 }
 
 func initLog() error {
-	log.InitLog()
+	log.InitLog(conf.EKTConf.LogPath)
 	return nil
 }
