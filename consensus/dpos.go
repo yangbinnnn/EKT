@@ -4,13 +4,16 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"xserver/x_http/x_resp"
 
 	"sync"
 	"time"
 
 	"bytes"
 	"errors"
+	"os"
+	"runtime"
+	"strings"
+
 	"github.com/EducationEKT/EKT/MPTPlus"
 	"github.com/EducationEKT/EKT/blockchain"
 	"github.com/EducationEKT/EKT/conf"
@@ -23,10 +26,6 @@ import (
 	"github.com/EducationEKT/EKT/param"
 	"github.com/EducationEKT/EKT/pool"
 	"github.com/EducationEKT/EKT/round"
-	"github.com/EducationEKT/EKT/util"
-	"os"
-	"runtime"
-	"strings"
 )
 
 type DPOSConsensus struct {
@@ -173,12 +172,12 @@ func (dpos DPOSConsensus) syncBlockBody(block *blockchain.Block) bool {
 	// 从打包节点获取body
 	body, err := block.GetRound().Peers[block.GetRound().CurrentIndex].GetDBValue(block.Body)
 	if err != nil {
-		log.Info("Can not get body from mining node, return false.")
+		log.Info("Can not get body from mining node, error %v", err)
 		return false
 	}
 	block.BlockBody, err = blockchain.FromBytes(body)
 	if err != nil {
-		log.Info("Get an error body, return false.")
+		log.Info("Get an error body, return false, error %v, body %v", err, body)
 		return false
 	}
 	return true
@@ -223,7 +222,7 @@ func (dpos DPOSConsensus) SendVote(block blockchain.Block) {
 		BlockHash:    block.Hash(),
 		BlockHeight:  block.Height,
 		VoteResult:   true,
-		Peer:         conf.EKTConfig.Node,
+		Peer:         *conf.EKTConfig.Node,
 	}
 
 	// 签名
@@ -236,10 +235,12 @@ func (dpos DPOSConsensus) SendVote(block blockchain.Block) {
 	// 向其他节点发送签名后的vote信息
 	log.Info("Signed this vote, sending vote result to other peers.")
 	for i, peer := range block.GetRound().Peers {
+		if IsMySelf(peer) {
+			continue
+		}
 		// 为了节省节点间带宽，只会向当前round内，距离打包节点近的n/2个节点
 		if (i-block.GetRound().CurrentIndex+len(block.GetRound().Peers))%len(block.GetRound().Peers) <= len(block.GetRound().Peers)/2 {
-			url := fmt.Sprintf(`http://%s:%d/vote/api/vote`, peer.Address, peer.Port)
-			go util.HttpPost(url, vote.Bytes())
+			go peer.NewVote(vote.Bytes())
 		}
 	}
 	log.Info("Send vote to other peer succeed.")
@@ -294,7 +295,7 @@ func (dpos DPOSConsensus) DelegateRun() {
 }
 
 // 判断peer在指定时间是否有打包区块的权力
-func (dpos DPOSConsensus) PeerTurn(ctxlog *ctxlog.ContextLog, packTime, lastBlockTime int64, peer p2p.Peer) bool {
+func (dpos DPOSConsensus) PeerTurn(ctxlog *ctxlog.ContextLog, packTime, lastBlockTime int64, peer *p2p.Peer) bool {
 	log.Info("Validating peer has the right to pack block.")
 
 	// 如果当前高度为0，则区块中不包含round，否则从block中取round
@@ -387,7 +388,7 @@ func (dpos *DPOSConsensus) Run() {
 				log.Info("Fail count more than 3 times.")
 				// 如果当前节点是DPoS节点，则不再根据区块高度同步区块，而是通过投票结果来同步区块
 				for _, peer := range param.MainChainDPosNode {
-					if peer.Equal(conf.EKTConfig.Node) {
+					if IsMySelf(peer) {
 						log.Info("This peer is DPoS node, start DPoS thread.")
 						// 开启Delegate线程并让此线程sleep
 						dpos.startDelegateThread()
@@ -512,7 +513,7 @@ func (dpos DPOSConsensus) Pack(ctxlog *ctxlog.ContextLog) {
 			log.Crit("Sign block failed. %v", err)
 		} else {
 			// 广播
-			dpos.broadcastBlock(block)
+			go dpos.broadcastBlock(block)
 			ctxlog.Log("block", block)
 		}
 	}
@@ -522,10 +523,18 @@ func (dpos DPOSConsensus) Pack(ctxlog *ctxlog.ContextLog) {
 func (dpos DPOSConsensus) broadcastBlock(block *blockchain.Block) {
 	log.Info("Broadcasting block to the other peers.")
 	data := block.Bytes()
+	var wg sync.WaitGroup
 	for _, peer := range block.GetRound().Peers {
-		url := fmt.Sprintf(`http://%s:%d/block/api/newBlock`, peer.Address, peer.Port)
-		go util.HttpPost(url, data)
+		if IsMySelf(peer) {
+			continue
+		}
+		wg.Add(1)
+		go func(p *p2p.Peer) {
+			p.NewBlock(data, false)
+			wg.Done()
+		}(peer)
 	}
+	wg.Wait()
 }
 
 // 从db中recover数据
@@ -571,7 +580,7 @@ func (dpos DPOSConsensus) RecoverFromDB() {
 func AliveDPoSPeerCount(peers p2p.Peers, print bool) int {
 	count := 0
 	for _, peer := range peers {
-		if peer.IsAlive() {
+		if peer.Online() {
 			if print {
 				log.Info("Peer %s is alive, address: %s \n", peer.PeerId, peer.Address)
 			}
@@ -599,6 +608,9 @@ func (dpos DPOSConsensus) SyncHeight(height int64) bool {
 		peers = round.Peers
 	}
 	for _, peer := range peers {
+		if IsMySelf(peer) {
+			continue
+		}
 		block, err := getBlockHeader(peer, height)
 		if err != nil || block.Height != height {
 			log.Info("Geting block header by height failed. %v", err)
@@ -648,8 +660,7 @@ func (dpos DPOSConsensus) VoteFromPeer(vote blockchain.BlockVote) {
 		log.Info("Vote number more than half node, sending vote result to other nodes.")
 		votes := dpos.VoteResults.GetVoteResults(hex.EncodeToString(vote.BlockHash))
 		for _, peer := range round.Peers {
-			url := fmt.Sprintf(`http://%s:%d/vote/api/voteResult`, peer.Address, peer.Port)
-			go util.HttpPost(url, votes.Bytes())
+			go peer.VoteResults(votes.Bytes())
 		}
 	} else {
 		log.Info("Current vote results: %s", string(dpos.VoteResults.GetVoteResults(hex.EncodeToString(vote.BlockHash)).Bytes()))
@@ -734,6 +745,7 @@ func (dpos DPOSConsensus) GetVotes(blockHash string) blockchain.Votes {
 	dbKey := []byte(fmt.Sprintf("block_votes:%s", blockHash))
 	data, err := db.GetDBInst().Get(dbKey)
 	if err != nil {
+		log.Debug("get votes error, %v", err)
 		return nil
 	}
 	var votes blockchain.Votes
@@ -749,41 +761,43 @@ func (dpos DPOSConsensus) GetCurrentDPOSPeers() p2p.Peers {
 	return param.MainChainDPosNode
 }
 
+func (dpos DPOSConsensus) GetPeer(peerId string) *p2p.Peer {
+	for _, peer := range param.MainChainDPosNode {
+		if peer.PeerId == peerId {
+			return peer
+		}
+	}
+	return nil
+}
+
 // 根据height获取blockHeader
-func getBlockHeader(peer p2p.Peer, height int64) (*blockchain.Block, error) {
-	url := fmt.Sprintf(`http://%s:%d/block/api/blockByHeight?height=%d`, peer.Address, peer.Port, height)
-	body, err := util.HttpGet(url)
+func getBlockHeader(peer *p2p.Peer, height int64) (*blockchain.Block, error) {
+	data, err := peer.GetBlock(height)
 	if err != nil {
 		return nil, err
 	}
-	var resp x_resp.XRespBody
-	err = json.Unmarshal(body, &resp)
-	data, err := json.Marshal(resp.Result)
-	if err == nil {
-		var block blockchain.Block
-		err = json.Unmarshal(data, &block)
-		return &block, err
+	var block blockchain.Block
+	err = json.Unmarshal(data, &block)
+	if err != nil {
+		return nil, err
 	}
-	return nil, err
+	return &block, nil
 }
 
 // 根据hash向委托人节点获取votes
-func getVotes(peer p2p.Peer, blockHash string) (blockchain.Votes, error) {
-	url := fmt.Sprintf(`http://%s:%d/vote/api/getVotes?hash=%s`, peer.Address, peer.Port, blockHash)
-	body, err := util.HttpGet(url)
+func getVotes(peer *p2p.Peer, blockHash string) (blockchain.Votes, error) {
+	data, err := peer.GetVotes(blockHash)
 	if err != nil {
 		return nil, err
 	}
-	var resp x_resp.XRespBody
-	err = json.Unmarshal(body, &resp)
-	if err == nil && resp.Status == 0 {
-		var votes blockchain.Votes
-		data, err := json.Marshal(resp.Result)
-		if err != nil {
-			return nil, err
-		}
-		err = json.Unmarshal(data, &votes)
-		return votes, err
+	var votes blockchain.Votes
+	err = json.Unmarshal(data, &votes)
+	if err != nil {
+		return nil, err
 	}
-	return nil, err
+	return votes, err
+}
+
+func IsMySelf(peer *p2p.Peer) bool {
+	return peer.Equal(conf.EKTConfig.Node)
 }

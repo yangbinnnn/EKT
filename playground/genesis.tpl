@@ -4,6 +4,7 @@
     "logPath": "/data/EKT/log/ekt8.log",
     "debug": true,
     "env": "{{.env}}",
+    "httpPort": {{.httpPort}},
     "node": {
         "peerId": "{{.peerId}}",
         "address": "{{.addr}}",

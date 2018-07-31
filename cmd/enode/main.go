@@ -11,6 +11,8 @@ import (
 	"github.com/EducationEKT/EKT/conf"
 	"github.com/EducationEKT/EKT/db"
 	"github.com/EducationEKT/EKT/log"
+	"github.com/EducationEKT/EKT/p2p"
+	"github.com/EducationEKT/EKT/p2pnet"
 	"github.com/EducationEKT/EKT/param"
 
 	"runtime"
@@ -53,8 +55,8 @@ func init() {
 }
 
 func main() {
-	fmt.Printf("server listen on :%d \n", conf.EKTConfig.Node.Port)
-	err := http.ListenAndServe(fmt.Sprintf(":%d", conf.EKTConfig.Node.Port), nil)
+	fmt.Printf("http server listen on :%d \n", conf.EKTConfig.HTTPPort)
+	err := http.ListenAndServe(fmt.Sprintf(":%d", conf.EKTConfig.HTTPPort), nil)
 	if err != nil {
 		fmt.Println(err.Error())
 	}
@@ -88,6 +90,12 @@ func InitService(confPath string) error {
 	// 初始化委托人节点
 	param.InitBootNodes()
 
+	// 初始化p2p 网络
+	err = initP2P()
+	if err != nil {
+		return err
+	}
+
 	// 启动多链
 	blockchain_manager.Init()
 
@@ -113,6 +121,22 @@ func initDB() {
 }
 
 func initLog() error {
-	log.InitLog(conf.EKTConf.LogPath)
+	log.InitLog(conf.EKTConfig.LogPath)
 	return nil
+}
+
+func initP2P() error {
+	var others []*p2p.Peer
+	var self *p2p.Peer
+	for _, peer := range param.MainChainDPosNode {
+		if peer.Equal(conf.EKTConfig.Node) {
+			self = peer
+		} else {
+			others = append(others, peer)
+		}
+	}
+	if self == nil {
+		self = conf.EKTConfig.Node
+	}
+	return p2pnet.NewServer(self, others).Start()
 }

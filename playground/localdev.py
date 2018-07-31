@@ -5,12 +5,14 @@ import os
 import json
 import glob
 
-DOCKER0_ADDR = '172.17.0.1'
+DOCKER0_ADDR = '127.0.0.1'
 EKTCLI = './ecli'
 assert os.path.exists(EKTCLI), 'ecli not found'
-NODE_NUM = 3
+NODE_NUM = 2
 LOCALDEV_PORT = 19993
+LOCALDEV_HTTP_PORT = 20003
 PORT_RANGE = [19990, 19991, 19992]
+HTTP_PORT_RANGE = [20000, 20001, 20002]
 assert len(PORT_RANGE) >= NODE_NUM, "port not enough"
 
 ENV = 'localnet'
@@ -46,22 +48,51 @@ def _gen_peers(num):
         ret.append((pk, peerId))
     return ret
 
+def _get_account(num):
+    cmd = '%s account new' % EKTCLI
+    ret = []
+    for _ in range(num):
+        data = os.popen(cmd).read().strip()
+        lines = data.split('\n')
+        if len(lines) != 2:
+            continue
+        items = lines[0].split(':')
+        if len(items) != 2 or 'Private Key' not in items[0]:
+            continue
+        pk = items[1].strip()
+        items = lines[1].split(':')
+        if len(items) != 2 or 'Your address is' not in items[0]:
+            continue
+        addr = items[1].strip()
+        ret.append((pk, addr))
+    return ret
+
 def gen_conf():
+    meta = open('peer_info.txt', 'wb')
+
     num = NODE_NUM
     peers = _gen_peers(num)
     genesis_tpl = open('genesis.tpl').read()
     genesis_tpl = genesis_tpl.replace('{{.env}}', ENV)
+    genesis_act = _get_account(3)
+    for i, act in enumerate(genesis_act):
+        genesis_tpl = genesis_tpl.replace('{{.genesisAddr' + str(i) + '}}', act[1])
+        meta.write('pk:%s addr:%s\n' % (act[0], act[1]))
+        meta.flush()
+
     nets = []
-    meta = open('peer_info.txt', 'wb')
     addr = DOCKER0_ADDR
     PORT_RANGE.append(LOCALDEV_PORT)
+    HTTP_PORT_RANGE.append(LOCALDEV_HTTP_PORT)
     for i in range(NODE_NUM+1):
         peer = peers.pop(0)
         pk, peerId = peer
         port = PORT_RANGE[i]
+        http_port = HTTP_PORT_RANGE[i]
         my_conf = genesis_tpl
         my_conf = my_conf.replace('{{.addr}}', addr)
         my_conf = my_conf.replace('{{.port}}', str(port))
+        my_conf = my_conf.replace('{{.httpPort}}', str(http_port))
         my_conf = my_conf.replace('{{.privateKey}}', pk)
         my_conf = my_conf.replace('{{.peerId}}', peerId)
         my_conf = my_conf.replace('{{.addrVer}}', str(ADDR_VERSION))

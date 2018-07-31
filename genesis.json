@@ -3,11 +3,12 @@
     "dbPath": "/data/EKT/db",
     "logPath": "/data/EKT/log/ekt8.log",
     "debug": false,
-    "env": "testnet",
+    "env": "localnet",
+    "httpPort": 20001,
     "node": {
         "peerId": "",
         "address": "127.0.0.1",
-        "port": 19951,
+        "port": 19991,
         "addressVersion": 4
     },
     "privateKey": "",
