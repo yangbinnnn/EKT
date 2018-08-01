@@ -262,14 +262,19 @@ func (sm *sessmgr) keepAlivedLoop() {
 				wg.Add(1)
 				go func(s *PeerSess) {
 					defer wg.Done()
+
 					online, err := s.CheckAlive()
+					if err != nil {
+						log.Error("Peer %s check alive, error: %v", s.peer.PeerId, err)
+					}
+
 					if !online {
-						s.Dial()
-						log.Error("Peer %s is offline, address %s, error: %v\n", s.peer.PeerId, s.peer.Address, err)
+						log.Error("Peer %s is offline, address %s, error: %v", s.peer.PeerId, s.peer.Address, err)
+						err = s.Dial()
 						if err != nil {
-							log.Error("Peer %s dial error: %v\n", s.peer.PeerId, err.Error())
+							log.Error("Peer %s dial error: %v", s.peer.PeerId, err.Error())
 						} else {
-							log.Info("Peer %s dial success\n", s.peer.PeerId)
+							log.Info("Peer %s dial success", s.peer.PeerId)
 						}
 					}
 				}(sess)
