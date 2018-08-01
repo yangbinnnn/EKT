@@ -4,6 +4,7 @@
     "logPath": "/data/EKT/log/ekt8.log",
     "debug": false,
     "env": "testnet",
+    "httpPort": 19952,
     "node": {
         "peerId": "",
         "address": "127.0.0.1",

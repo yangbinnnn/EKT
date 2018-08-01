@@ -11,6 +11,10 @@ import (
 
 	"bytes"
 	"errors"
+	"os"
+	"runtime"
+	"strings"
+
 	"github.com/EducationEKT/EKT/MPTPlus"
 	"github.com/EducationEKT/EKT/blockchain"
 	"github.com/EducationEKT/EKT/conf"
@@ -23,10 +27,6 @@ import (
 	"github.com/EducationEKT/EKT/param"
 	"github.com/EducationEKT/EKT/pool"
 	"github.com/EducationEKT/EKT/round"
-	"github.com/EducationEKT/EKT/util"
-	"os"
-	"runtime"
-	"strings"
 )
 
 type DPOSConsensus struct {
@@ -138,7 +138,7 @@ func (dpos DPOSConsensus) getBlockEvents(block *blockchain.Block) (list []userev
 			dpos.Blockchain.Pool.EventGetter <- eventGetter
 			event := <-eventGetter.Chan
 			if event == nil {
-				data, err := block.Round.Peers[block.Round.CurrentIndex].GetDBValue(id)
+				data, err := p2p.GetSess(block.Round.Peers[block.Round.CurrentIndex]).GetDBValue(id)
 				if !bytes.EqualFold(crypto.Sha3_256(data), id) {
 					return nil, errors.New("Invalid Response")
 				}
@@ -171,7 +171,7 @@ func (dpos DPOSConsensus) syncUserEvent(eventId string) bool {
 
 func (dpos DPOSConsensus) syncBlockBody(block *blockchain.Block) bool {
 	// 从打包节点获取body
-	body, err := block.GetRound().Peers[block.GetRound().CurrentIndex].GetDBValue(block.Body)
+	body, err := p2p.GetSess(block.GetRound().Peers[block.GetRound().CurrentIndex]).GetDBValue(block.Body)
 	if err != nil {
 		log.Info("Can not get body from mining node, return false.")
 		return false
@@ -238,8 +238,7 @@ func (dpos DPOSConsensus) SendVote(block blockchain.Block) {
 	for i, peer := range block.GetRound().Peers {
 		// 为了节省节点间带宽，只会向当前round内，距离打包节点近的n/2个节点
 		if (i-block.GetRound().CurrentIndex+len(block.GetRound().Peers))%len(block.GetRound().Peers) <= len(block.GetRound().Peers)/2 {
-			url := fmt.Sprintf(`http://%s:%d/vote/api/vote`, peer.Address, peer.Port)
-			go util.HttpPost(url, vote.Bytes())
+			go p2p.GetSess(peer).NewVote(vote.Bytes())
 		}
 	}
 	log.Info("Send vote to other peer succeed.")
@@ -523,8 +522,7 @@ func (dpos DPOSConsensus) broadcastBlock(block *blockchain.Block) {
 	log.Info("Broadcasting block to the other peers.")
 	data := block.Bytes()
 	for _, peer := range block.GetRound().Peers {
-		url := fmt.Sprintf(`http://%s:%d/block/api/newBlock`, peer.Address, peer.Port)
-		go util.HttpPost(url, data)
+		go p2p.GetSess(peer).NewBlock(data, false)
 	}
 }
 
@@ -571,7 +569,7 @@ func (dpos DPOSConsensus) RecoverFromDB() {
 func AliveDPoSPeerCount(peers p2p.Peers, print bool) int {
 	count := 0
 	for _, peer := range peers {
-		if peer.IsAlive() {
+		if p2p.GetSess(peer).Online() {
 			if print {
 				log.Info("Peer %s is alive, address: %s \n", peer.PeerId, peer.Address)
 			}
@@ -648,8 +646,7 @@ func (dpos DPOSConsensus) VoteFromPeer(vote blockchain.BlockVote) {
 		log.Info("Vote number more than half node, sending vote result to other nodes.")
 		votes := dpos.VoteResults.GetVoteResults(hex.EncodeToString(vote.BlockHash))
 		for _, peer := range round.Peers {
-			url := fmt.Sprintf(`http://%s:%d/vote/api/voteResult`, peer.Address, peer.Port)
-			go util.HttpPost(url, votes.Bytes())
+			go p2p.GetSess(peer).VoteResults(votes.Bytes())
 		}
 	} else {
 		log.Info("Current vote results: %s", string(dpos.VoteResults.GetVoteResults(hex.EncodeToString(vote.BlockHash)).Bytes()))
@@ -687,7 +684,7 @@ func (dpos DPOSConsensus) RecieveVoteResult(votes blockchain.Votes) bool {
 			return false
 		}
 		dpos.Blockchain.SaveBlock(block)
-		body, err := block.Round.Peers[block.Round.CurrentIndex].GetDBValue(block.Body)
+		body, err := p2p.GetSess(block.Round.Peers[block.Round.CurrentIndex]).GetDBValue(block.Body)
 		if err != nil {
 
 		}
@@ -751,8 +748,7 @@ func (dpos DPOSConsensus) GetCurrentDPOSPeers() p2p.Peers {
 
 // 根据height获取blockHeader
 func getBlockHeader(peer p2p.Peer, height int64) (*blockchain.Block, error) {
-	url := fmt.Sprintf(`http://%s:%d/block/api/blockByHeight?height=%d`, peer.Address, peer.Port, height)
-	body, err := util.HttpGet(url)
+	body, err := p2p.GetSess(peer).GetBlock(height)
 	if err != nil {
 		return nil, err
 	}
@@ -769,8 +765,7 @@ func getBlockHeader(peer p2p.Peer, height int64) (*blockchain.Block, error) {
 
 // 根据hash向委托人节点获取votes
 func getVotes(peer p2p.Peer, blockHash string) (blockchain.Votes, error) {
-	url := fmt.Sprintf(`http://%s:%d/vote/api/getVotes?hash=%s`, peer.Address, peer.Port, blockHash)
-	body, err := util.HttpGet(url)
+	body, err := p2p.GetSess(peer).GetVotes(blockHash)
 	if err != nil {
 		return nil, err
 	}

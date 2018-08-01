@@ -13,6 +13,7 @@ type EKTConf struct {
 	DBPath               string          `json:"dbPath"`
 	LogPath              string          `json:"logPath"`
 	Debug                bool            `json:"debug"`
+	HTTPPort             uint16          `json:"httpPort"`
 	Node                 p2p.Peer        `json:"node"`
 	BlockchainManagePwd  string          `json:"blockchainManagePwd"`
 	GenesisBlockAccounts []types.Account `json:"genesisBlock"`

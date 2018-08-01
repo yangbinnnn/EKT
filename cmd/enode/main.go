@@ -5,16 +5,15 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime"
 
-	_ "github.com/EducationEKT/EKT/api"
+	api "github.com/EducationEKT/EKT/api"
 	"github.com/EducationEKT/EKT/blockchain_manager"
 	"github.com/EducationEKT/EKT/conf"
 	"github.com/EducationEKT/EKT/db"
 	"github.com/EducationEKT/EKT/log"
+	"github.com/EducationEKT/EKT/p2p"
 	"github.com/EducationEKT/EKT/param"
-
-	"runtime"
-
 	"github.com/EducationEKT/xserver/x_http"
 )
 
@@ -53,8 +52,8 @@ func init() {
 }
 
 func main() {
-	fmt.Printf("server listen on :%d \n", conf.EKTConfig.Node.Port)
-	err := http.ListenAndServe(fmt.Sprintf(":%d", conf.EKTConfig.Node.Port), nil)
+	fmt.Printf("http server listen on :%d \n", conf.EKTConfig.HTTPPort)
+	err := http.ListenAndServe(fmt.Sprintf(":%d", conf.EKTConfig.HTTPPort), nil)
 	if err != nil {
 		fmt.Println(err.Error())
 	}
@@ -88,6 +87,12 @@ func InitService(confPath string) error {
 	// 初始化委托人节点
 	param.InitBootNodes()
 
+	// 初始化p2p 网络
+	err = initP2P()
+	if err != nil {
+		return err
+	}
+
 	// 启动多链
 	blockchain_manager.Init()
 
@@ -114,5 +119,11 @@ func initDB() {
 
 func initLog() error {
 	log.InitLog(conf.EKTConfig.LogPath)
+	return nil
+}
+
+func initP2P() error {
+	apiPort := uint16(conf.EKTConfig.Node.Port)
+	p2p.InitP2Pnet(param.MainChainDPosNode, apiPort, new(api.Api), conf.EKTConfig.Debug)
 	return nil
 }

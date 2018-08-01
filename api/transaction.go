@@ -9,10 +9,12 @@ import (
 	"github.com/EducationEKT/EKT/crypto"
 	"github.com/EducationEKT/EKT/db"
 	"github.com/EducationEKT/EKT/dispatcher"
+	"github.com/EducationEKT/EKT/p2p"
 	"github.com/EducationEKT/EKT/param"
 	"github.com/EducationEKT/EKT/util"
 
 	"encoding/hex"
+
 	"github.com/EducationEKT/EKT/blockchain_manager"
 	"github.com/EducationEKT/EKT/core/userevent"
 	"github.com/EducationEKT/xserver/x_err"
@@ -107,7 +109,7 @@ func broadcastTx(req *x_req.XReq) (*x_resp.XRespContainer, *x_err.XErr) {
 
 func synchronizeTransaction(txId []byte) {
 	for _, peer := range param.MainChainDPosNode {
-		if value, err := peer.GetDBValue(txId); err != nil {
+		if value, err := p2p.GetSess(peer).GetDBValue(txId); err != nil {
 			db.GetDBInst().Set(txId, value)
 		}
 	}

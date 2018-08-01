@@ -239,10 +239,10 @@ func (block Block) ValidateBlockStat(next Block, events []userevent.IUserEvent) 
 	_next := NewBlock(block)
 
 	//让新生成的区块执行peer传过来的body中的user events进行计算
-	if len(block.BlockBody.Events) > 0 {
-		//for _, eventId := range block.BlockBody.Events {
-		//}
-	}
+	// if len(block.BlockBody.Events) > 0 {
+	// 	for _, eventId := range block.BlockBody.Events {
+	// 	}
+	// }
 	//if block.BlockBody != nil {
 	//	block.BlockBody.Events.Range(func(key, value interface{}) bool {
 	//		_, ok1 := key.(string)
